@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -34,7 +35,7 @@ type TodayScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main'>
 
 export default function TodayScreen() {
   const navigation = useNavigation<TodayScreenNavigationProp>();
-  const { habits, getHabitsForDate, toggleHabitCompletion } = useHabits();
+  const { getHabitsForDate, toggleHabitCompletion } = useHabits();
   const [filter, setFilter] = useState<FilterType>('all');
   
   // ✅ Add state for custom input dialog
@@ -46,7 +47,95 @@ export default function TodayScreen() {
     placeholder: '',
     defaultValue: '',
   });
-  
+  // state
+const [notifSheetOpen, setNotifSheetOpen] = useState(false);
+const [busy, setBusy] = useState(false);
+
+// get from your context/services
+const { settings, updateSettings, habits } = useHabits();
+
+// helper: request OS permission (stub; implement in your NotificationService)
+async function ensureOsPermission(): Promise<boolean> {
+  // return await NotificationService.requestPermission(); // implement per platform or Expo
+  return true;
+}
+
+// helper: schedule/cancel (stubs; implement according to your scheduler)
+async function rescheduleAllRemindersForActiveHabits() {
+  // iterate habits, schedule reminders from their reminders[] times
+}
+async function cancelAllScheduledReminders() {
+  // cancel all pending notifications
+}
+async function snoozeAllTodayBy(minutes: number) {
+  // find next occurrences for today and push them by {minutes}
+}
+
+// handlers
+const handleToggleNotifications = async () => {
+  if (busy) return;
+  setBusy(true);
+  try {
+    const next = !settings.notifications;
+    if (next) {
+      const granted = await ensureOsPermission();
+      if (!granted) {
+        // show a toast/toast-like message in your app to inform user to enable at OS level
+        setBusy(false);
+        setNotifSheetOpen(false);
+        return;
+      }
+      await updateSettings({ notifications: true });
+      await rescheduleAllRemindersForActiveHabits();
+    } else {
+      await updateSettings({ notifications: false });
+      await cancelAllScheduledReminders();
+    }
+  } finally {
+    setBusy(false);
+    setNotifSheetOpen(false);
+  }
+};
+
+const handleEditReminders = () => {
+  setNotifSheetOpen(false);
+  // Option: navigate to a dedicated Reminders screen
+  // Or open Add/Edit Habit with a param to focus reminders UI
+  navigation.navigate('AddEditHabit'); // you can pass { focus: 'reminders' }
+};
+
+const handleSnoozeAll = async () => {
+  if (busy) return;
+  setBusy(true);
+  try {
+    await snoozeAllTodayBy(60);
+  } finally {
+    setBusy(false);
+    setNotifSheetOpen(false);
+  }
+};
+const sheetStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheet: {
+    position: 'absolute',
+    left: 0, right: 0, bottom: 0,
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 16, borderTopRightRadius: 16,
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
+  },
+  grabber: {
+    alignSelf: 'center', width: 36, height: 4, borderRadius: 2,
+    backgroundColor: COLORS.border, marginBottom: 8,
+  },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  text: { ...LAYOUT.typography.body, color: COLORS.textPrimary },
+  cancel: {
+    marginTop: 8, paddingVertical: 12, alignItems: 'center',
+    backgroundColor: COLORS.background, borderRadius: 12,
+  },
+  cancelText: { ...LAYOUT.typography.body, color: COLORS.textSecondary },
+});
+
   const today = new Date().toISOString().split('T')[0];
   const todaysHabits = getHabitsForDate(today);
 
@@ -146,9 +235,10 @@ export default function TodayScreen() {
             })}
           </Text>
         </View>
-        <TouchableOpacity style={styles.notificationButton}>
-          <Ionicons name="notifications-outline" size={24} color={COLORS.textPrimary} />
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.notificationButton} onPress={() => setNotifSheetOpen(true)}>
+  <Ionicons name="notifications-outline" size={24} color={COLORS.textPrimary} />
+</TouchableOpacity>
+
       </View>
 
       {/* Progress Summary */}
@@ -203,6 +293,40 @@ export default function TodayScreen() {
         onSubmit={handleInputSubmit}
         onCancel={handleInputCancel}
       />
+
+      <Modal transparent visible={notifSheetOpen} animationType="fade" onRequestClose={() => setNotifSheetOpen(false)}>
+  <TouchableOpacity activeOpacity={1} style={sheetStyles.backdrop} onPress={() => setNotifSheetOpen(false)}>
+    <View />
+  </TouchableOpacity>
+
+  <View style={sheetStyles.sheet}>
+    <View style={sheetStyles.grabber} />
+
+    <TouchableOpacity style={sheetStyles.item} onPress={handleToggleNotifications} disabled={busy}>
+      <Ionicons name={settings.notifications ? 'notifications-off' : 'notifications'} size={18} color={COLORS.primary} />
+      <Text style={sheetStyles.text}>
+        {settings.notifications ? 'Disable notifications' : 'Enable notifications'}
+      </Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={sheetStyles.item} onPress={handleEditReminders} disabled={busy}>
+      <Ionicons name="alarm" size={18} color={COLORS.textPrimary} />
+      <Text style={sheetStyles.text}>Edit reminders</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={sheetStyles.item} onPress={handleSnoozeAll} disabled={busy || !settings.notifications}>
+      <Ionicons name="time" size={18} color={settings.notifications ? COLORS.textPrimary : COLORS.textSecondary} />
+      <Text style={[sheetStyles.text, !settings.notifications && { color: COLORS.textSecondary }]}>
+        Snooze all for 1 hour
+      </Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={sheetStyles.cancel} onPress={() => setNotifSheetOpen(false)} disabled={busy}>
+      <Text style={sheetStyles.cancelText}>Cancel</Text>
+    </TouchableOpacity>
+  </View>
+</Modal>
+
     </SafeAreaView>
   );
 }
